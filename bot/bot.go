@@ -70,7 +70,8 @@ func NewBot(backend Client, publicKey gosmtypes.Address, key ed25519.PrivateKey,
 		help:         b.getHelp,
 		faucetStatus: b.getFaucetStatus,
 		faucetAddr:   b.getFaucetAddress,
-		txInfo:       b.getTxInfo}
+		txInfo:       b.getTxInfo,
+		dumpTxs:      b.getDumpTx}
 
 	return b
 }
@@ -107,10 +108,7 @@ func (b *botBackend) OnMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 	if handler, has := b.handlers[spllited[0]]; has {
 		out, err := handler(spllited)
 		if err != nil {
-			_, err := s.ChannelMessageSend(m.ChannelID, "error: "+err.Error())
-			if err != nil {
-				println(err)
-			}
+			println(err.Error())
 			return
 		}
 		_, err = s.ChannelMessageSend(m.ChannelID, out)
@@ -121,13 +119,13 @@ func (b *botBackend) OnMessage(s *discordgo.Session, m *discordgo.MessageCreate)
 		if strings.HasPrefix(strings.ToLower(spllited[0]), "0x") {
 			out, err := b.transferFunds(spllited)
 			if err != nil {
-				println(err)
-				_, _ = s.ChannelMessageSend(m.ChannelID, out)
+				println(err.Error())
+				_, _ = s.ChannelMessageSend(m.ChannelID, err.Error())
 				return
 			}
 			_, err = s.ChannelMessageSend(m.ChannelID, out)
 			if err != nil {
-				println(err)
+				println(err.Error())
 			}
 
 		}
@@ -139,7 +137,7 @@ func (b *botBackend) getBalance(cmd []string) (string, error) {
 	if len(cmd) < 2 {
 		return "", fmt.Errorf("account name not provided")
 	}
-	address := gosmtypes.BytesToAddress(util.FromHex(cmd[2]))
+	address := gosmtypes.BytesToAddress(util.FromHex(cmd[1]))
 	if address.Big().Uint64() == 0 {
 		return "", fmt.Errorf("wrong address format")
 	}
@@ -148,7 +146,7 @@ func (b *botBackend) getBalance(cmd []string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("account %v balance %v", address.String(), state.GetStateCurrent().Balance), nil
+	return fmt.Sprintf("account %v balance %v", address.String(), state.GetStateCurrent().Balance.Value), nil
 }
 
 func (b *botBackend) getHelp(cmd []string) (string, error) {
@@ -159,16 +157,31 @@ func (b *botBackend) getDumpTx(cmd []string) (string, error) {
 	if len(cmd) < 2 {
 		return "", fmt.Errorf("account name not provided")
 	}
-	address := gosmtypes.BytesToAddress(util.FromHex(cmd[2]))
+	address := gosmtypes.BytesToAddress(util.FromHex(cmd[1]))
 	if address.Big().Uint64() == 0 {
 		return "", fmt.Errorf("wrong address format")
 	}
-	state, err := b.backend.AccountState(address)
+	txs, _, err := b.backend.GetMeshTransactions(address, 0, 100)
 	if err != nil {
 		return "", err
 	}
+	str := ""
+	for _, tx := range txs {
+		str += getTxStr(tx)
+	}
+	return str, nil
+}
 
-	return fmt.Sprintf("account %v balance %v", address.String(), state.GetStateCurrent().Balance), nil
+func getTxStr(tranasction *apitypes.MeshTransaction) string {
+	tx := tranasction.Transaction
+	ct := tx.GetCoinTransfer()
+	msg := fmt.Sprintf("tx info:\nfrom: %v\nto: %v\namount: %v\nfee: %v\nlayer:%v\n",
+		gosmtypes.BytesToAddress(tx.Sender.Address).String(),
+		gosmtypes.BytesToAddress(ct.Receiver.Address).String(),
+		tx.Amount,
+		tx.GasOffered,
+		tranasction.LayerId.Number)
+	return msg
 }
 
 func (b *botBackend) getFaucetStatus(cmd []string) (string, error) {
@@ -186,7 +199,7 @@ func (b *botBackend) getFaucetStatus(cmd []string) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("balance: %v, synced: %v, peers: %v layer :%v", state.StateProjected.Balance, status.IsSynced, status.ConnectedPeers, status.TopLayer), nil
+	return fmt.Sprintf("Balance: %v\n Synced: %v\n Peers: %v\n Layer :%v", state.StateProjected.Balance, status.IsSynced, status.ConnectedPeers, status.TopLayer), nil
 }
 
 func (b *botBackend) getFundAmount() uint64 {
@@ -212,21 +225,12 @@ func (b *botBackend) getTxInfo(cmd []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	msg := fmt.Sprintf("tx info: from: %v, to %v, amount %v, fee %v , status %v", tx.Sender.String(), tx.GetCoinTransfer().Receiver.String(), tx.Amount, tx.GasOffered, state.String())
+	ct := tx.GetCoinTransfer()
+	msg := fmt.Sprintf("tx info: from: %v\nto %v\namount %v\nfee %v\nstatus %v", gosmtypes.BytesToAddress(tx.Sender.Address).String(), gosmtypes.BytesToAddress(ct.Receiver.Address).String(), tx.Amount, tx.GasOffered, state.State.String())
 	return msg, nil
 }
 
 func (b *botBackend) transferFunds(cmd []string) (string, error) {
-	//todo: this should be in config
-	/*
-		privateKeyStr := inputNotBlank("Enter account private key: ")
-		privateKeyBytes := util.FromHex(privateKeyStr)
-		privateKey := ed25519.PrivateKey(privateKeyBytes)
-
-		counterStr := inputNotBlank("Enter account counter: ")
-		counter, err := strconv.ParseUint(counterStr, 10, 64) */
-
 	if err := b.canSubmitTransactions(); err != nil {
 		return "", err
 	}
@@ -237,16 +241,17 @@ func (b *botBackend) transferFunds(cmd []string) (string, error) {
 		return "", err
 	}
 
-	amount := uint64(DefaultTxAmount) //todo: default amount
-	gas := uint64(1)
-	counter := uint64(0)
+	amount := uint64(b.cfg.TransferAmount) //todo: default amount
+	gas := uint64(50)
+
+	account, err := b.backend.AccountState(b.getFaucetAddr())
+	if err != nil {
+		println("err reading faucet status")
+	}
 
 	fmt.Println("New transaction summary:")
-	//fmt.Println("From:  ", srcAddress.String())
 	fmt.Println("To:    ", destAddress.String())
-	//fmt.Println("Amount:", amountStr, coinUnitName)
-	//fmt.Println("Fee:   ", gas, coinUnitName)
-	fmt.Println("Nonce: ", counter)
+	fmt.Println("Nonce: ", account.StateProjected.Counter)
 
 	state, err := b.backend.AccountState(b.getFaucetAddr())
 	if err != nil {
@@ -259,13 +264,13 @@ func (b *botBackend) transferFunds(cmd []string) (string, error) {
 
 	if ts, ok := b.backoff[destAddress.String()]; ok {
 		if time.Now().Before(ts) {
-			return "", fmt.Errorf("user %v requested funds too soon")
+			return "", fmt.Errorf("account %v requested funds too soon", destAddress.String())
 		}
 	}
 
-	txState, err := b.backend.Transfer(destAddress, counter, amount, gas, 100, b.getFaucetPrivateKey())
+	txState, err := b.backend.Transfer(destAddress, account.StateProjected.Counter, amount, gas, 100, b.getFaucetPrivateKey())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("🚫 tx rejected by node, %v", err)
 	}
 
 	txStateDispString := transactionStateDisStringsMap[int32(txState.State.Number())]
@@ -274,12 +279,12 @@ func (b *botBackend) transferFunds(cmd []string) (string, error) {
 	fmt.Println("Transaction state:", txStateDispString)
 
 	if txState.State <= apitypes.TransactionState_TRANSACTION_STATE_CONFLICTING {
-		return "", fmt.Errorf("tx rejected by node, %v", txStateDispString)
+		return "", fmt.Errorf("🚫 tx rejected by node, %v", txStateDispString)
 	}
 
-	b.backoff[destAddress.String()] = time.Now().Add(TranserBackoffSeconds * time.Second)
+	b.backoff[destAddress.String()] = time.Now().Add(b.cfg.RequestCoolDown)
 
-	return fmt.Sprintf("transferred funds to "), nil
+	return fmt.Sprintf("💸  transferred funds to %v\n txID: %v", destAddress.String(), "0x"+Bytes2Hex(txState.Id.Id)), nil
 }
 
 // canSubmitTransactions returns true if the node is accepting transactions.

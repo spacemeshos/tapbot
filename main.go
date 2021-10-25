@@ -44,11 +44,11 @@ func main() {
 	pk := ed25519.PrivateKey{}
 	if cfg.Mnemonic != "" {
 		seed := bip39.NewSeed(cfg.Mnemonic, "")
-		pk := ed25519.NewDerivedKeyFromSeed(seed[:32], 0, []byte(spaceSalt))
+		pk = ed25519.NewDerivedKeyFromSeed(seed[:32], 0, []byte(spaceSalt))
 		pub := pk.Public().(ed25519.PublicKey)[:]
 		addr = types.BytesToAddress(pub)
 	} else {
-		pk, err := bot.NewPrivateKeyFromBuffer(bot.FromHex(cfg.PrivateKey))
+		pk, err = bot.NewPrivateKeyFromBuffer(bot.FromHex(cfg.PrivateKey))
 		if err != nil {
 			fmt.Println("no address provided")
 			return
@@ -72,7 +72,7 @@ func main() {
 		return
 	}
 
-	be, err := client.OpenConnection(cfg.Server, false,"")
+	be, err := client.OpenConnection(cfg.Server, cfg.SecureConnection,"")
 	if err != nil {
 		fmt.Println("Error creating wallet backend: ", err)
 		return

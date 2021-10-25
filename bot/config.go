@@ -14,7 +14,7 @@ type BaseConfig struct {
 	Server         string `mapstructure:"server"`
 	BotToken string `mapstructure:"token"`
 	RequestCoolDown time.Duration `mapstructure:"cooldown"`
-	Port string `mapstructure:"port"`
+	SecureConnection bool `mapstructure:"secure"`
 }
 
 func DefaultConfig() *BaseConfig {
