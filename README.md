@@ -45,6 +45,13 @@ cooldown= "10s"
 # gateway for node API
 server= "api-devnet208.spacemesh.io:9092"
 ```
-then run from terminal 
+  
+run build command: 
+  
+  `go build`
+  
+  
+then run from terminal:
+  
   ` ./tap`
   
