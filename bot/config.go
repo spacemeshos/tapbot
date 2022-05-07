@@ -7,14 +7,14 @@ import (
 )
 
 type BaseConfig struct {
-	Mnemonic       string `mapstructure:"mnemonic"`
-	PublicKey      string `mapstructure:"pub-key"`
-	PrivateKey     string `mapstructure:"priv-key"`
-	TransferAmount uint64   `mapstructure:"transfer-amount"`
-	Server         string `mapstructure:"server"`
-	BotToken string `mapstructure:"token"`
-	RequestCoolDown time.Duration `mapstructure:"cooldown"`
-	SecureConnection bool `mapstructure:"secure"`
+	Mnemonic         string        `mapstructure:"mnemonic"`
+	PublicKey        string        `mapstructure:"pub-key"`
+	PrivateKey       string        `mapstructure:"priv-key"`
+	TransferAmount   uint64        `mapstructure:"transfer-amount"`
+	Server           string        `mapstructure:"server"`
+	BotToken         string        `mapstructure:"token"`
+	RequestCoolDown  time.Duration `mapstructure:"cooldown"`
+	SecureConnection bool          `mapstructure:"secure"`
 }
 
 func DefaultConfig() *BaseConfig {
@@ -35,7 +35,6 @@ func LoadConfigFromFile() (*BaseConfig, error) {
 	}
 
 	conf := DefaultConfig()
-
 	// load config if it was loaded to our viper
 	err := vip.Unmarshal(&conf)
 	if err != nil {
@@ -57,7 +56,7 @@ func LoadConfig(fileLocation string, vip *viper.Viper) (err error) {
 
 	if err != nil {
 		if fileLocation != defaultConfigFileName {
-			//log.Warning("failed loading config from %v trying %v. error %v", fileLocation, defaultConfigFileName, err)
+			fmt.Sprintf("failed loading config from %v trying %v. error %v", fileLocation, defaultConfigFileName, err)
 			fmt.Println(fmt.Sprintf("Failed to parse config %v", err))
 			vip.SetConfigFile(defaultConfigFileName)
 			err = vip.ReadInConfig()
@@ -70,4 +69,3 @@ func LoadConfig(fileLocation string, vip *viper.Viper) (err error) {
 
 	return nil
 }
-

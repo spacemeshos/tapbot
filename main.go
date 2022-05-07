@@ -8,6 +8,8 @@ import (
 	"github.com/spacemeshos/ed25519"
 	"github.com/spacemeshos/go-spacemesh/common/types"
 	"github.com/spacemeshos/smrepl/client"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"github.com/tyler-smith/go-bip39"
 	"log"
 	"os"
@@ -19,6 +21,12 @@ const spaceSalt = "Spacemesh blockmesh"
 
 func main() {
 	// todo: read args - api address, account privatekey
+	configLocation := ""
+	flag.StringVar(&configLocation, "config", "", "location of config file")
+
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
+	viper.BindPFlags(pflag.CommandLine)
 
 	cfg, err := bot.LoadConfigFromFile()
 	if err != nil {
@@ -34,8 +42,6 @@ func main() {
 		flag.StringVar(&cfg.Mnemonic, "wallet-directory", "", "set default wallet files directory")
 		flag.StringVar(&cfg.BotToken, "bot", "", "token for discord bot")
 	}
-
-
 
 	//apiAddr := "127.0.0.1:9092"
 	//accountpk := ed25519.NewKeyFromSeed([]byte("somerandombytes"))
@@ -72,19 +78,17 @@ func main() {
 		return
 	}
 
-	be, err := client.OpenConnection(cfg.Server, cfg.SecureConnection,"")
+	be, err := client.OpenConnection(cfg.Server, cfg.SecureConnection, "")
 	if err != nil {
 		fmt.Println("Error creating wallet backend: ", err)
-		return
+		dg.AddHandler(ServerUnavailable)
+	} else {
+		// Register ready as a callback for the ready events.
+		dg.AddHandler(ready)
+		bb := bot.NewBot(be, addr, pk, *cfg)
+		// Register messageCreate as a callback for the messageCreate events.
+		dg.AddHandler(bb.OnMessage)
 	}
-
-	bb := bot.NewBot(be, addr, pk, *cfg)
-
-	// Register ready as a callback for the ready events.
-	dg.AddHandler(ready)
-
-	// Register messageCreate as a callback for the messageCreate events.
-	dg.AddHandler(bb.OnMessage)
 
 	// Open the websocket and begin listening.
 	err = dg.Open()
@@ -95,9 +99,25 @@ func main() {
 	stop := make(chan struct{})
 	exit := make(chan int)
 	go handleSignals(exit, stop)
+	fmt.Println("Bot Ready")
+
 	<-exit
 
+}
 
+func ServerUnavailable(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if m.Author.ID == s.State.User.ID {
+		return
+	}
+	ch, err := s.Channel(m.ChannelID)
+	if err != nil {
+		println("no channel ", err)
+		return
+	}
+	if ch.Name != "tap" {
+		return
+	}
+	_, err = s.ChannelMessageSend(m.ChannelID, "Bot is offline, network unavailable, please try again later")
 }
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
@@ -105,7 +125,7 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 	s.ChannelMessageSend("tap", "faucet bot ready")
 }
 
-func  handleSignals(exitCh chan int, stop chan struct{}) {
+func handleSignals(exitCh chan int, stop chan struct{}) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(
 		sigCh,
